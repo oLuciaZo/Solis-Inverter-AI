@@ -1,0 +1,29 @@
+{
+  "name": "solis-inverter-ai-monorepo",
+  "version": "1.0.0",
+  "description": "Professional Solis Inverter AI Dashboard & Model Context Protocol (MCP) Server",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "npm --prefix backend run start:dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build:backend": "npm --prefix backend run build",
+    "build:frontend": "npm --prefix frontend run build",
+    "build": "npm run build:backend && npm run build:frontend",
+    "mcp": "node backend/dist/mcp-runner.js"
+  },
+  "keywords": [
+    "solis",
+    "soliscloud",
+    "inverter",
+    "solar",
+    "mcp",
+    "claude",
+    "nextjs",
+    "nestjs"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^10.0.5"
+  }
+}
