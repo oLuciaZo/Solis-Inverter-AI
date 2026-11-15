@@ -12,6 +12,27 @@ export interface SystemEvent {
   category: 'battery' | 'grid' | 'solar' | 'inverter' | 'system';
 }
 
+const IDLE_KW = 0.05;
+const BATTERY_FULL_SOC = 95;
+const CURTAIL_MATCH_MIN_KW = 0.2;
+const CURTAIL_MATCH_RATIO = 0.1;
+
+/**
+ * PV curtailment heuristic: the inverter throttles PV down to the home load when the battery
+ * can't absorb more and export is zero/limited. Signature: PV producing, battery full & idle,
+ * no export, and PV ≈ load (within max(0.2 kW, 10% of load)).
+ */
+export function isPvCurtailed(t: SolarTelemetry): boolean {
+  const pv = t.pvPower ?? 0;
+  const load = t.loadPower ?? 0;
+  const batteryFullIdle =
+    t.batteryState === 'full' ||
+    ((t.batterySoc ?? 0) >= BATTERY_FULL_SOC && Math.abs(t.batteryPower ?? 0) < IDLE_KW);
+  const notExporting = (t.gridPower ?? 0) < IDLE_KW;
+  const tracksLoad = Math.abs(pv - load) <= Math.max(CURTAIL_MATCH_MIN_KW, load * CURTAIL_MATCH_RATIO);
+  return pv >= IDLE_KW && batteryFullIdle && notExporting && tracksLoad;
+}
+
 export function deriveEvents(telemetry: SolarTelemetry): SystemEvent[] {
   const events: SystemEvent[] = [];
 
@@ -114,6 +135,16 @@ export function deriveEvents(telemetry: SolarTelemetry): SystemEvent[] {
       tone: 'ok',
       category: 'solar',
     });
+    if (isPvCurtailed(telemetry)) {
+      events.push({
+        id: 'pv-curtailed',
+        title: 'Solar output limited (curtailment)',
+        detail: `Battery full and nothing exported, so PV is held to the home load (${pvPower.toFixed(2)} kW). Extra sunlight is unused — good time to run heavy appliances.`,
+        relativeTime: 'Live',
+        tone: 'warn',
+        category: 'solar',
+      });
+    }
   } else {
     events.push({
       id: 'pv-standby',
