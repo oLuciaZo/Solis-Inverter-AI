@@ -15,7 +15,8 @@ const config: Config = {
   rootDir: '.',
   testRegex: '.*\\.spec\\.ts$',
   transform: {
-    '^.+\\.(t|j)s$': 'ts-jest',
+    // TS 6 reports TS5011 (implicit rootDir) under ts-jest; tsc itself builds fine.
+    '^.+\\.(t|j)s$': ['ts-jest', { diagnostics: { ignoreCodes: ['TS5011'] } }],
   },
   moduleNameMapper: pathsToModuleNameMapper(paths, { prefix: '<rootDir>/' }),
   collectCoverageFrom: [

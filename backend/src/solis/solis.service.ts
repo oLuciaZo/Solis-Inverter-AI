@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
 import { SolisAuthService } from './solis-auth.service';
 import { SolisMockService, SolarTelemetry } from './solis-mock.service';
+import { deriveBatteryState, deriveGridState, num, toKw, toKwh } from './solis-units';
 
 @Injectable()
 export class SolisService {
@@ -109,33 +110,77 @@ export class SolisService {
       // Extract real-time power (kW)
       let pvPower = 0;
       if (stationData?.power !== undefined) {
-        pvPower = Number(stationData.power);
+        pvPower = toKw(stationData.power, stationData.powerStr);
       } else if (invData?.pvAndAcCoupledPower !== undefined) {
-        pvPower = Number(invData.pvAndAcCoupledPower);
+        pvPower = toKw(invData.pvAndAcCoupledPower, invData.pvAndAcCoupledPowerStr);
       } else if (invData?.pac !== undefined) {
-        pvPower = Number(invData.pac);
+        pvPower = toKw(invData.pac, invData.pacStr);
       }
 
       // Battery status
-      const batterySoc = Number(d.batteryPercent ?? invData?.batteryPercent ?? d.batteryCapacitySoc ?? 0);
-      const batteryPower = Number(d.batteryPower ?? invData?.batteryPower ?? 0);
-      const batteryVoltage = Number(invData?.storageBatteryVoltage ?? invData?.batteryVoltage ?? 52.6);
-      const batteryCurrent = Number(invData?.storageBatteryCurrent ?? invData?.bstteryCurrent ?? 0);
+      const batterySoc = num(d.batteryPercent ?? invData?.batteryCapacitySoc ?? invData?.batteryPercent ?? 0);
+      const batterySoh =
+        invData?.batteryHealthSoh !== undefined && invData?.batteryHealthSoh !== null
+          ? num(invData.batteryHealthSoh)
+          : 99;
+      const batteryMinSoc =
+        invData?.socDischargeSet !== undefined && invData?.socDischargeSet !== null
+          ? num(invData.socDischargeSet)
+          : null;
 
-      // Grid power (kW)
-      const gridPower = Number(d.psum ?? invData?.gridDetailVo?.gridPower ?? 0);
+      const batUnit = d.batteryPowerStr ?? invData?.batteryPowerStr;
+      const rawBat = d.batteryPower ?? invData?.batteryPower;
+      const batZheng = num(d.batteryPowerZheng);
+      const batFu = num(d.batteryPowerFu);
+      let batteryPower = 0;
+      if (rawBat !== undefined && rawBat !== null && num(rawBat) < 0) {
+        batteryPower = toKw(rawBat, batUnit);
+      } else if (batZheng !== 0 || batFu !== 0) {
+        batteryPower = toKw(batZheng - batFu, batUnit);
+      } else if (rawBat !== undefined && rawBat !== null) {
+        batteryPower = toKw(rawBat, batUnit);
+      }
+
+      const batteryVoltage = num(invData?.storageBatteryVoltage ?? invData?.batteryVoltage ?? 52.6);
+      const batteryCurrent = num(invData?.storageBatteryCurrent ?? invData?.bstteryCurrent ?? 0);
+
+      // Grid power (kW, +export / -import)
+      let gridPower = 0;
+      if (d.psum !== undefined && d.psum !== null) {
+        const psumVal = num(d.psum);
+        if (psumVal !== 0) {
+          gridPower = toKw(psumVal, d.psumStr);
+        } else {
+          const psumZheng = num(d.psumZheng);
+          const psumFu = num(d.psumFu);
+          if (psumZheng !== 0 || psumFu !== 0) {
+            gridPower = toKw(psumZheng - psumFu, d.psumStr);
+          }
+        }
+      } else if (invData?.gridDetailVo?.gridPower !== undefined) {
+        gridPower = toKw(invData.gridDetailVo.gridPower, invData.gridDetailVo.gridPowerStr);
+      }
 
       // Home load power (kW)
-      let loadPower = Number(d.familyLoadPower ?? invData?.familyLoadPowerV2 ?? invData?.totalAndSmartLoadPower ?? 0);
-      if (loadPower === 0 && pvPower > 0) {
+      const hasFamilyLoad = d.familyLoadPower !== undefined && d.familyLoadPower !== null;
+      const rawLoadPower = hasFamilyLoad
+        ? d.familyLoadPower
+        : (invData?.familyLoadPowerV2 ?? invData?.totalAndSmartLoadPower);
+      const rawLoadUnit = hasFamilyLoad
+        ? d.familyLoadPowerStr
+        : (invData?.familyLoadPowerV2 !== undefined
+            ? invData?.familyLoadPowerV2Str
+            : invData?.totalAndSmartLoadPowerStr);
+      let loadPower = rawLoadPower !== undefined && rawLoadPower !== null ? toKw(rawLoadPower, rawLoadUnit) : 0;
+      if (!hasFamilyLoad && loadPower === 0 && pvPower > 0) {
         loadPower = parseFloat(Math.max(0, pvPower - batteryPower - gridPower).toFixed(2));
       }
 
       // String voltages & currents
       const strings = [];
       if (invData?.uPv1 !== undefined || invData?.iPv1 !== undefined) {
-        const v1 = Number(invData.uPv1 || 0);
-        const i1 = Number(invData.iPv1 || 0);
+        const v1 = num(invData.uPv1);
+        const i1 = num(invData.iPv1);
         strings.push({
           name: 'String 1 (PV1 Array)',
           voltage: v1,
@@ -144,8 +189,8 @@ export class SolisService {
         });
       }
       if (invData?.uPv2 !== undefined || invData?.iPv2 !== undefined) {
-        const v2 = Number(invData.uPv2 || 0);
-        const i2 = Number(invData.iPv2 || 0);
+        const v2 = num(invData.uPv2);
+        const i2 = num(invData.iPv2);
         strings.push({
           name: 'String 2 (PV2 Array)',
           voltage: v2,
@@ -161,41 +206,127 @@ export class SolisService {
         );
       }
 
-      // Cumulative yields
-      const yieldToday = Number(d.dayEnergy ?? invData?.eToday ?? 0);
-      const yieldMonth = Number(d.monthEnergy ?? invData?.eMonth ?? 0);
-      const yieldYear = Number(d.yearEnergy ?? invData?.eYear ?? 0);
-      const yieldTotal = Number(d.allEnergy ?? invData?.eTotal ?? 0);
+      // Cumulative yields (yieldToday/Month in kWh, yieldYear/Total in MWh)
+      const toMwh = (val: unknown, unitStr?: string | null): number => {
+        const u = (unitStr ?? '').trim().toLowerCase();
+        if (u === 'kwh' || u === 'wh') {
+          return toKwh(val, unitStr) / 1000;
+        }
+        return num(val);
+      };
 
-      const gridImportToday = Number(d.gridPurchasedDayEnergy ?? 0);
-      const gridExportToday = Number(d.gridSellDayEnergy ?? 0);
-      const loadToday = Number(d.homeLoadTodayEnergy ?? 0);
+      const yieldToday = toKwh(
+        d.dayEnergy ?? invData?.eToday,
+        d.dayEnergy !== undefined ? d.dayEnergyStr : invData?.eTodayStr,
+      );
+      const yieldMonth = toKwh(
+        d.monthEnergy ?? invData?.eMonth,
+        d.monthEnergy !== undefined ? d.monthEnergyStr : invData?.eMonthStr,
+      );
+      const yieldYear = toMwh(
+        d.yearEnergy ?? invData?.eYear,
+        d.yearEnergy !== undefined ? d.yearEnergyStr : invData?.eYearStr,
+      );
+      const yieldTotal = toMwh(
+        d.allEnergy ?? invData?.eTotal,
+        d.allEnergy !== undefined ? d.allEnergyStr : invData?.eTotalStr,
+      );
+
+      // Battery today energies (NEVER use stationDetail's batteryTodayChargeEnergy — it is 0/wrong)
+      const batteryChargeToday =
+        invData?.batteryTodayChargeEnergy !== undefined && invData?.batteryTodayChargeEnergy !== null
+          ? toKwh(invData.batteryTodayChargeEnergy, invData.batteryTodayChargeEnergyStr)
+          : toKwh(stationData?.batteryChargeEnergy, stationData?.batteryChargeEnergyStr);
+      const batteryDischargeToday =
+        invData?.batteryTodayDischargeEnergy !== undefined && invData?.batteryTodayDischargeEnergy !== null
+          ? toKwh(invData.batteryTodayDischargeEnergy, invData.batteryTodayDischargeEnergyStr)
+          : toKwh(stationData?.batteryDischargeEnergy, stationData?.batteryDischargeEnergyStr);
+
+      const gridImportToday =
+        invData?.gridPurchasedTodayEnergy !== undefined && invData?.gridPurchasedTodayEnergy !== null
+          ? toKwh(invData.gridPurchasedTodayEnergy, invData.gridPurchasedTodayEnergyStr)
+          : toKwh(d.gridPurchasedDayEnergy, d.gridPurchasedDayEnergyStr);
+      const gridExportToday =
+        invData?.gridSellTodayEnergy !== undefined && invData?.gridSellTodayEnergy !== null
+          ? toKwh(invData.gridSellTodayEnergy, invData.gridSellTodayEnergyStr)
+          : toKwh(d.gridSellDayEnergy, d.gridSellDayEnergyStr);
+
+      const gridImportMonth = toKwh(
+        d.gridPurchasedMonthEnergy ?? invData?.gridPurchasedMonthEnergy,
+        d.gridPurchasedMonthEnergy !== undefined
+          ? d.gridPurchasedMonthEnergyStr
+          : invData?.gridPurchasedMonthEnergyStr,
+      );
+      const gridExportMonth = toKwh(
+        d.gridSellMonthEnergy ?? invData?.gridSellMonthEnergy,
+        d.gridSellMonthEnergy !== undefined ? d.gridSellMonthEnergyStr : invData?.gridSellMonthEnergyStr,
+      );
+
+      const loadToday = toKwh(d.homeLoadTodayEnergy, d.homeLoadTodayEnergyStr);
+
+      // AC & Power Factor
+      const rawAcVoltage = invData?.uAc1 ?? invData?.gridDetailVo?.gridVoltageA;
+      const acVoltage = rawAcVoltage !== undefined && rawAcVoltage !== null ? num(rawAcVoltage) : null;
+      const acCurrent = invData?.iAc1 !== undefined && invData?.iAc1 !== null ? num(invData.iAc1) : null;
+
+      const rawPf = invData?.gridDetailVo?.gridPowerFactor ?? invData?.powerFactor;
+      const pfVal = rawPf !== undefined && rawPf !== null ? num(rawPf) : 0;
+      let powerFactor: number | null = null;
+      let powerFactorEstimated = false;
+
+      if (invData?.isShowPowerFactor === 0 || pfVal === 0) {
+        const p = num(invData?.acGridPowerA);
+        const q = num(invData?.acGridReactivePowerA);
+        if (p > 0) {
+          const apparent = Math.sqrt(p * p + q * q);
+          powerFactor = apparent > 0 ? parseFloat((p / apparent).toFixed(2)) : null;
+          powerFactorEstimated = powerFactor !== null;
+        }
+      } else {
+        powerFactor = pfVal;
+      }
+
+      const pvPowerRounded = parseFloat(pvPower.toFixed(2));
+      const batteryPowerRounded = parseFloat(batteryPower.toFixed(2));
+      const gridPowerRounded = parseFloat(gridPower.toFixed(2));
+      const loadPowerRounded = parseFloat(loadPower.toFixed(2));
 
       return {
-        timestamp: d.dataTimestamp ? Number(d.dataTimestamp) : Date.now(),
+        timestamp: d.dataTimestamp ? num(d.dataTimestamp) : Date.now(),
         timeStr: d.dataTimestampStr || new Date().toLocaleTimeString(),
         status: 'online',
-        pvPower: parseFloat(pvPower.toFixed(2)),
-        batteryPower: parseFloat(batteryPower.toFixed(2)),
+        pvPower: pvPowerRounded,
+        batteryPower: batteryPowerRounded,
         batterySoc,
-        batterySoh: 99,
+        batterySoh,
         batteryVoltage,
         batteryCurrent,
-        gridPower: parseFloat(gridPower.toFixed(2)),
-        loadPower: parseFloat(loadPower.toFixed(2)),
-        inverterTemp: Number(invData?.inverterTemperature ?? 38.5),
-        frequency: Number(invData?.gridDetailVo?.gridFac ?? invData?.fac ?? 50.0),
-        powerFactor: Number(invData?.gridDetailVo?.gridPowerFactor ?? invData?.powerFactor ?? 1.0),
+        gridPower: gridPowerRounded,
+        loadPower: loadPowerRounded,
+        gridState: deriveGridState(gridPowerRounded),
+        batteryState: deriveBatteryState(batteryPowerRounded, batterySoc),
+        inverterTemp: num(invData?.inverterTemperature ?? 38.5),
+        frequency: num(invData?.gridDetailVo?.gridFac ?? invData?.fac ?? 50.0),
+        acVoltage,
+        acCurrent,
+        powerFactor,
+        powerFactorEstimated,
         strings,
         yieldToday,
         yieldMonth,
         yieldYear,
         yieldTotal,
+        batteryChargeToday,
+        batteryDischargeToday,
+        batteryMinSoc,
         gridImportToday,
         gridExportToday,
+        gridImportMonth,
+        gridExportMonth,
         loadToday,
         co2AvoidedToday: parseFloat((yieldToday * 0.65).toFixed(2)),
         treesPlantedEquivalent: parseFloat((yieldToday * 0.054).toFixed(1)),
+        dataSource: 'live',
       };
     } catch (err: any) {
       this.logger.error(`Error fetching live telemetry: ${err.message}`);
@@ -221,16 +352,16 @@ export class SolisService {
 
       if (Array.isArray(response?.data) && response.data.length > 0) {
         const points = response.data.map((item: any) => {
-          const rawSolar = item.power ?? 0;
-          const rawLoad = item.familyLoadPower ?? item.consumeEnergy ?? 0;
-          const rawBat = item.batteryPower ?? 0;
-          const rawGrid = item.psum ?? 0;
-
-          // Normalize values (if > 10 it is in Watts, divide by 1000)
-          const solar = rawSolar > 15 ? parseFloat((rawSolar / 1000).toFixed(2)) : parseFloat(rawSolar.toFixed(2));
-          const load = rawLoad > 15 ? parseFloat((rawLoad / 1000).toFixed(2)) : parseFloat(rawLoad.toFixed(2));
-          const battery = rawBat > 15 || rawBat < -15 ? parseFloat((rawBat / 1000).toFixed(2)) : parseFloat(rawBat.toFixed(2));
-          const grid = rawGrid > 15 || rawGrid < -15 ? parseFloat((rawGrid / 1000).toFixed(2)) : parseFloat(rawGrid.toFixed(2));
+          const solar = parseFloat(toKw(item.power, item.powerStr).toFixed(2));
+          const hasFamilyLoad = item.familyLoadPower !== undefined && item.familyLoadPower !== null;
+          const load = parseFloat(
+            toKw(
+              hasFamilyLoad ? item.familyLoadPower : item.consumeEnergy,
+              hasFamilyLoad ? item.familyLoadPowerStr : item.consumeEnergyStr,
+            ).toFixed(2),
+          );
+          const battery = parseFloat(toKw(item.batteryPower, item.batteryPowerStr).toFixed(2));
+          const grid = parseFloat(toKw(item.psum, item.psumStr).toFixed(2));
 
           return {
             time: item.timeStr?.length > 5 ? item.timeStr.substring(0, 5) : item.timeStr || '',

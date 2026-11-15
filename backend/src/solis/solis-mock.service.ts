@@ -1,4 +1,7 @@
 import { Injectable } from '@nestjs/common';
+import { BatteryState, FlowState, deriveBatteryState, deriveGridState } from './solis-units';
+
+export type { BatteryState, FlowState };
 
 export interface SolarTelemetry {
   timestamp: number;
@@ -13,10 +16,15 @@ export interface SolarTelemetry {
   batteryCurrent: number; // Amps
   gridPower: number; // Positive = exporting to grid, Negative = importing from grid
   loadPower: number; // Total consumption kW
+  gridState: FlowState;
+  batteryState: BatteryState;
   // Inverter internals
   inverterTemp: number; // Celsius
   frequency: number; // Hz (e.g. 50.0)
-  powerFactor: number;
+  acVoltage: number | null; // V
+  acCurrent: number | null; // A
+  powerFactor: number | null;
+  powerFactorEstimated: boolean;
   // Strings
   strings: {
     name: string;
@@ -29,12 +37,18 @@ export interface SolarTelemetry {
   yieldMonth: number; // kWh
   yieldYear: number; // MWh
   yieldTotal: number; // MWh
+  batteryChargeToday: number; // kWh
+  batteryDischargeToday: number; // kWh
+  batteryMinSoc: number | null; // % reserve
   gridImportToday: number; // kWh
   gridExportToday: number; // kWh
+  gridImportMonth: number; // kWh
+  gridExportMonth: number; // kWh
   loadToday: number; // kWh
   // Environmental
   co2AvoidedToday: number; // kg
   treesPlantedEquivalent: number;
+  dataSource: 'live' | 'mock';
 }
 
 @Injectable()
@@ -110,6 +124,10 @@ export class SolisMockService {
     const loadToday = parseFloat((1.8 * hour).toFixed(2));
     const gridImportToday = parseFloat((Math.max(1.2, loadToday * 0.35)).toFixed(2));
     const gridExportToday = parseFloat((Math.max(0, yieldToday * 0.45)).toFixed(2));
+    const batteryChargeToday = parseFloat((yieldToday * 0.38).toFixed(2));
+    const batteryDischargeToday = parseFloat((loadToday * 0.28).toFixed(2));
+    const acVoltage = parseFloat((230.2 + (Math.random() - 0.5) * 1.4).toFixed(1));
+    const acCurrent = parseFloat(((loadPower * 1000) / acVoltage).toFixed(2));
 
     return {
       timestamp: now.getTime(),
@@ -123,9 +141,14 @@ export class SolisMockService {
       batteryCurrent: parseFloat((Math.abs(batteryPower) * 1000 / 51.8).toFixed(1)),
       gridPower,
       loadPower,
+      gridState: deriveGridState(gridPower),
+      batteryState: deriveBatteryState(batteryPower, batterySoc),
       inverterTemp: parseFloat((36.5 + (pvPower * 2.1)).toFixed(1)),
       frequency: 50.0,
+      acVoltage,
+      acCurrent,
       powerFactor: 0.99,
+      powerFactorEstimated: false,
       strings: [
         { name: 'String 1 (East Roof - 10x 450W)', voltage: uPv1, current: iPv1, power: Math.round(pv1W) },
         { name: 'String 2 (West Roof - 8x 450W)', voltage: uPv2, current: iPv2, power: Math.round(pv2W) },
@@ -134,11 +157,17 @@ export class SolisMockService {
       yieldMonth: 842.5,
       yieldYear: 6.84,
       yieldTotal: 24.92,
+      batteryChargeToday,
+      batteryDischargeToday,
+      batteryMinSoc: 20,
       gridImportToday,
       gridExportToday,
+      gridImportMonth: 48.5,
+      gridExportMonth: 184.2,
       loadToday,
       co2AvoidedToday: parseFloat((yieldToday * 0.65).toFixed(2)),
       treesPlantedEquivalent: parseFloat((yieldToday * 0.054).toFixed(1)),
+      dataSource: 'mock',
     };
   }
 
