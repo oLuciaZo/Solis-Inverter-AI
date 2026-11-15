@@ -65,4 +65,7 @@ batteryState 'full' when idle and SOC ≥ 95.
 - T02: Animated EnergyFlowDiagram component
 - T03: Lector theme shell, page layout and NOC components (uses T01 types + T02)
 ### M2 — Review
-- T04: Review M1 diff (agy, no code changes) then fix task if needed
+- T04: Review M1 diff — SKIPPED (user closed the milestone without review)
+### M3 — Follow-ups from live check
+- T05: Signed battery/grid series + battery SOC % line in the 24h chart
+- T06: PV curtailment event in the system timeline (done by Claude directly)
