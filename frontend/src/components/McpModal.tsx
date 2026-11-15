@@ -13,6 +13,20 @@ export const McpModal: React.FC<McpModalProps> = ({ isOpen, onClose }) => {
 
   if (!isOpen) return null;
 
+  const [activeTab, setActiveTab] = useState<'sse' | 'rest' | 'stdio'>('sse');
+
+  const sseConfig = `{
+  "mcpServers": {
+    "solis-inverter": {
+      "url": "http://localhost:1234/sse"
+    }
+  }
+}`;
+
+  const restCurlExample = `curl -X POST http://localhost:1234/call \\
+  -H "Content-Type: application/json" \\
+  -d '{"name": "solis_get_telemetry"}'`;
+
   const mcpConfig = `{
   "mcpServers": {
     "solis-inverter": {
@@ -32,8 +46,10 @@ export const McpModal: React.FC<McpModalProps> = ({ isOpen, onClose }) => {
   }
 }`;
 
+  const currentSnippet = activeTab === 'sse' ? sseConfig : activeTab === 'rest' ? restCurlExample : mcpConfig;
+
   const handleCopy = () => {
-    navigator.clipboard.writeText(mcpConfig);
+    navigator.clipboard.writeText(currentSnippet);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -63,21 +79,63 @@ export const McpModal: React.FC<McpModalProps> = ({ isOpen, onClose }) => {
           </div>
         </div>
 
-        <div className="mt-6 space-y-4 text-xs">
+        {/* Tab Selection */}
+        <div className="flex items-center gap-2 mt-4 border-b border-slate-800 pb-2">
+          <button
+            onClick={() => setActiveTab('sse')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              activeTab === 'sse'
+                ? 'bg-purple-600/30 border border-purple-500/50 text-purple-300'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            📡 MCP SSE (Port 1234)
+          </button>
+          <button
+            onClick={() => setActiveTab('rest')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              activeTab === 'rest'
+                ? 'bg-purple-600/30 border border-purple-500/50 text-purple-300'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            ⚡ Direct REST / Gemini Spark
+          </button>
+          <button
+            onClick={() => setActiveTab('stdio')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              activeTab === 'stdio'
+                ? 'bg-purple-600/30 border border-purple-500/50 text-purple-300'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            💻 Local Stdio Runner
+          </button>
+        </div>
+
+        <div className="mt-4 space-y-4 text-xs">
           <div>
             <h4 className="font-semibold text-slate-200 mb-1 flex items-center gap-1.5">
-              <Terminal className="w-3.5 h-3.5 text-purple-400" /> Claude Desktop Setup Instructions:
+              <Terminal className="w-3.5 h-3.5 text-purple-400" />
+              {activeTab === 'sse' && 'MCP SSE Config (Gemini Spark / Cursor / Antigravity):'}
+              {activeTab === 'rest' && 'Direct REST Function Calling (Port 1234):'}
+              {activeTab === 'stdio' && 'Claude Desktop Local Stdio Config:'}
             </h4>
             <p className="text-slate-400 mb-2">
-              Add the following block to your Claude Desktop configuration file at:{' '}
-              <code className="text-purple-300 bg-purple-950/40 px-1 py-0.5 rounded">
-                ~/Library/Application Support/Claude/claude_desktop_config.json
-              </code>
+              {activeTab === 'sse' && (
+                <>Connect any MCP client to: <code className="text-purple-300 bg-purple-950/40 px-1 py-0.5 rounded">http://localhost:1234/sse</code></>
+              )}
+              {activeTab === 'rest' && (
+                <>Execute tools via HTTP POST: <code className="text-purple-300 bg-purple-950/40 px-1 py-0.5 rounded">http://localhost:1234/call</code></>
+              )}
+              {activeTab === 'stdio' && (
+                <>Add to <code className="text-purple-300 bg-purple-950/40 px-1 py-0.5 rounded">claude_desktop_config.json</code></>
+              )}
             </p>
 
             <div className="relative group">
               <pre className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-slate-300 font-mono text-[11px] overflow-x-auto leading-relaxed">
-                {mcpConfig}
+                {currentSnippet}
               </pre>
               <button
                 onClick={handleCopy}

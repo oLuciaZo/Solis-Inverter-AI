@@ -43,9 +43,37 @@ Solis-Inverter AI/
 
 ## 🚀 Quick Start
 
-### 1. Start Both Backend & Frontend
+### Option A: Run with Docker Compose (Recommended)
+
+1. Copy the example environment file:
+```bash
+cp .env.example .env
+```
+*(Optionally set your SolisCloud API credentials in `.env`, or leave `SOLIS_MOCK_MODE=true` for out-of-the-box simulation)*
+
+2. Build and launch all services:
+```bash
+docker compose up -d
+# or: npm run docker:up
+```
+
+3. Open **[http://localhost:3000](http://localhost:3000)** in your browser.
+   - **Frontend Dashboard**: `http://localhost:3000`
+   - **Backend API**: `http://localhost:4000/api/solis/telemetry`
+
+To view logs or stop the containers:
+```bash
+docker compose logs -f    # or: npm run docker:logs
+docker compose down       # or: npm run docker:down
+```
+
+---
+
+### Option B: Local Node.js Development
+
 ```bash
 # In project root:
+npm install
 npm run dev:backend    # Runs NestJS on http://localhost:4000
 npm run dev:frontend   # Runs Next.js on http://localhost:3000
 ```
@@ -53,10 +81,45 @@ Open **[http://localhost:3000](http://localhost:3000)** in your browser.
 
 ---
 
-## 🤖 Claude Desktop & AI MCP Integration
+## 🤖 Model Context Protocol (MCP) Server (Port 1234)
 
-Add the Solis MCP server to your Claude Desktop configuration (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+The platform provides a dedicated high-performance **MCP Server on port `1234`** running alongside the backend. It supports both **SSE (Server-Sent Events)** for AI assistants and **Direct REST Tool Calling**.
 
+### 1. Connect Gemini Spark / Cursor / Antigravity via SSE
+Point your MCP client or configuration to the SSE endpoint:
+- **SSE URL**: `http://localhost:1234/sse` (or `http://<server-ip>:1234/sse`)
+
+Example MCP configuration (`settings.json` or MCP client config):
+```json
+{
+  "mcpServers": {
+    "solis-inverter": {
+      "url": "http://localhost:1234/sse"
+    }
+  }
+}
+```
+
+### 2. Direct REST Tool Calling (Gemini Spark / HTTP / cURL)
+You can directly call inverter tools via standard HTTP POST without needing full SSE:
+
+```bash
+# Get live solar & battery telemetry
+curl -X POST http://localhost:1234/call \
+  -H "Content-Type: application/json" \
+  -d '{"name": "solis_get_telemetry"}'
+
+# Get real-time power flow balance
+curl -X POST http://localhost:1234/call \
+  -H "Content-Type: application/json" \
+  -d '{"name": "solis_get_energy_flow"}'
+
+# Inspect available tools and schemas
+curl http://localhost:1234/tools
+```
+
+### 3. Claude Desktop Local Stdio Runner
+File: `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {

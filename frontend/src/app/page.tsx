@@ -12,7 +12,7 @@ import { SettingsModal } from '../components/SettingsModal';
 import { SolarTelemetry, StationOverview, DailyCurvePoint } from '../types/solis';
 import { ShieldAlert, Info } from 'lucide-react';
 
-const API_BASE = 'http://localhost:4000/api/solis';
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || '/api/solis';
 
 // Default high-fidelity fallback state
 const defaultTelemetry: SolarTelemetry = {

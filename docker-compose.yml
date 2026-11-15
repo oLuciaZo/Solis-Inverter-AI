@@ -1,0 +1,56 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: solis-backend:latest
+    container_name: solis-backend
+    restart: unless-stopped
+    ports:
+      - "${PORT:-4000}:4000"
+      - "${MCP_PORT:-1234}:1234"
+    env_file:
+      - path: .env
+        required: false
+      - path: ./backend/.env
+        required: false
+    environment:
+      - PORT=4000
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:4000/api/solis/config" ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - solis-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: solis-frontend:latest
+    container_name: solis-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-9999}:3000"
+    environment:
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - BACKEND_URL=http://backend:4000
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:3000/" ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - solis-network
+
+networks:
+  solis-network:
+    name: solis-network
+    driver: bridge
