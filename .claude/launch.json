@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "noc-backend",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd backend && npx nest build && set -a && eval \"$(docker exec solis-backend env | grep -E '^SOLIS_' | sed 's/^/export /')\" && PORT=4111 MCP_PORT=1288 node dist/main"],
+      "port": 4111
+    },
+    {
+      "name": "noc-frontend",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd frontend && BACKEND_URL=http://localhost:4111 npx next dev -p 3466"],
+      "port": 3466
+    }
+  ]
+}

@@ -352,16 +352,15 @@ export class SolisService {
 
       if (Array.isArray(response?.data) && response.data.length > 0) {
         const points = response.data.map((item: any) => {
-          const solar = parseFloat(toKw(item.power, item.powerStr).toFixed(2));
-          const hasFamilyLoad = item.familyLoadPower !== undefined && item.familyLoadPower !== null;
-          const load = parseFloat(
-            toKw(
-              hasFamilyLoad ? item.familyLoadPower : item.consumeEnergy,
-              hasFamilyLoad ? item.familyLoadPowerStr : item.consumeEnergyStr,
-            ).toFixed(2),
-          );
-          const battery = parseFloat(toKw(item.batteryPower, item.batteryPowerStr).toFixed(2));
-          const grid = parseFloat(toKw(item.psum, item.psumStr).toFixed(2));
+          // stationDay returns raw Watts for every series. `powerStr` says "kW" but
+          // `powerPec` (0.001) is the real multiplier, so the *Str fields cannot be trusted here.
+          const W_TO_KW = 0.001;
+          const pec = Number(item.powerPec) || W_TO_KW;
+          const kw = (v: unknown, mult = W_TO_KW) => parseFloat((num(v) * mult).toFixed(2));
+          const solar = kw(item.power, pec);
+          const load = kw(item.familyLoadPower ?? item.consumeEnergy);
+          const battery = kw(item.batteryPower);
+          const grid = kw(item.psum);
 
           return {
             time: item.timeStr?.length > 5 ? item.timeStr.substring(0, 5) : item.timeStr || '',
