@@ -1,3 +1,6 @@
+export type FlowState = 'importing' | 'exporting' | 'idle';
+export type BatteryState = 'charging' | 'discharging' | 'idle' | 'full';
+
 export interface SolarTelemetry {
   timestamp: number;
   timeStr: string;
@@ -10,9 +13,14 @@ export interface SolarTelemetry {
   batteryCurrent: number; // A
   gridPower: number; // positive = exporting, negative = importing
   loadPower: number; // kW
+  gridState: FlowState;
+  batteryState: BatteryState;
   inverterTemp: number; // °C
   frequency: number; // Hz
-  powerFactor: number;
+  acVoltage: number | null; // V (uAc1 / gridVoltageA)
+  acCurrent: number | null; // A (iAc1)
+  powerFactor: number | null; // null = not reported
+  powerFactorEstimated: boolean;
   strings: {
     name: string;
     voltage: number;
@@ -23,11 +31,17 @@ export interface SolarTelemetry {
   yieldMonth: number; // kWh
   yieldYear: number; // MWh
   yieldTotal: number; // MWh
+  batteryChargeToday: number; // kWh
+  batteryDischargeToday: number; // kWh
+  batteryMinSoc: number | null; // % reserve (socDischargeSet)
   gridImportToday: number;
   gridExportToday: number;
+  gridImportMonth: number; // kWh
+  gridExportMonth: number; // kWh
   loadToday: number;
   co2AvoidedToday: number;
   treesPlantedEquivalent: number;
+  dataSource: 'live' | 'mock';
 }
 
 export interface StationOverview {
@@ -54,4 +68,5 @@ export interface DailyCurvePoint {
   load: number;
   battery: number;
   grid: number;
+  batterySoc?: number | null;
 }
