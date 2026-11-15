@@ -68,4 +68,5 @@ export interface DailyCurvePoint {
   load: number;
   battery: number;
   grid: number;
+  batterySoc?: number | null;
 }

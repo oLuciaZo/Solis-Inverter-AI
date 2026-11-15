@@ -17,12 +17,32 @@ interface GenerationOverviewCardProps {
   curveData: DailyCurvePoint[];
 }
 
+const IDLE_KW_THRESHOLD = 0.05;
+
 function parseTimeToMinutes(timeStr: string): number {
   if (!timeStr) return 0;
   const parts = timeStr.split(':');
   const h = parseInt(parts[0], 10) || 0;
   const m = parseInt(parts[1], 10) || 0;
   return Math.min(1440, Math.max(0, h * 60 + m));
+}
+
+function formatSignedKw(val: number): string {
+  if (val < -0.004) return `\u2212${Math.abs(val).toFixed(2)}`;
+  if (val > 0.004) return `+${val.toFixed(2)}`;
+  return '0.00';
+}
+
+function describeBattery(kw: number): string {
+  if (kw > IDLE_KW_THRESHOLD) return 'charging';
+  if (kw < -IDLE_KW_THRESHOLD) return 'discharging';
+  return 'idle';
+}
+
+function describeGrid(kw: number): string {
+  if (kw > IDLE_KW_THRESHOLD) return 'exporting';
+  if (kw < -IDLE_KW_THRESHOLD) return 'importing';
+  return 'no exchange';
 }
 
 export function GenerationOverviewCard({
@@ -35,8 +55,9 @@ export function GenerationOverviewCard({
   const [visibleSeries, setVisibleSeries] = useState({
     solar: true,
     load: true,
-    battery: false,
-    grid: false,
+    battery: true,
+    batterySoc: true,
+    grid: true,
   });
 
   const points = useMemo(() => {
@@ -63,12 +84,23 @@ export function GenerationOverviewCard({
         ? 100
         : 0;
 
-  // Chart calculations
-  const maxSolar = points.length ? Math.max(...points.map((d) => d.solar), 1) : 1;
-  const maxLoad = points.length ? Math.max(...points.map((d) => d.load), 1) : 1;
-  const maxBat = points.length ? Math.max(...points.map((d) => Math.abs(d.battery || 0)), 1) : 1;
-  const maxGrd = points.length ? Math.max(...points.map((d) => Math.abs(d.grid || 0)), 1) : 1;
-  const maxVal = Math.max(maxSolar, maxLoad, maxBat, maxGrd, 6.0);
+  // Chart calculations (signed kW domain across visible series + 0-100% SOC right axis)
+  let minVal = 0;
+  let maxVal = 1;
+  for (const d of points) {
+    if (visibleSeries.solar) maxVal = Math.max(maxVal, d.solar ?? 0);
+    if (visibleSeries.load) maxVal = Math.max(maxVal, d.load ?? 0);
+    if (visibleSeries.battery) {
+      const b = d.battery ?? 0;
+      minVal = Math.min(minVal, b);
+      maxVal = Math.max(maxVal, b);
+    }
+    if (visibleSeries.grid) {
+      const g = d.grid ?? 0;
+      minVal = Math.min(minVal, g);
+      maxVal = Math.max(maxVal, g);
+    }
+  }
 
   const svgWidth = 860;
   const svgHeight = 220;
@@ -76,17 +108,20 @@ export function GenerationOverviewCard({
   const paddingY = 24;
   const chartWidth = svgWidth - paddingX * 2;
   const chartHeight = svgHeight - paddingY * 2;
+  const range = maxVal - minVal || 1;
 
   const getXFromMinutes = (mins: number) => paddingX + (mins / 1440) * chartWidth;
   const getY = (val: number) =>
-    paddingY + chartHeight - (Math.max(0, val) / maxVal) * chartHeight;
+    paddingY + chartHeight - ((val - minVal) / range) * chartHeight;
+  const zeroY = getY(0);
+  const getSocY = (soc: number) =>
+    paddingY + chartHeight - (Math.max(0, Math.min(100, soc)) / 100) * chartHeight;
 
   const buildPath = (key: 'solar' | 'load' | 'battery' | 'grid') => {
     return points
       .map((pt, i) => {
         const x = getXFromMinutes(parseTimeToMinutes(pt.time));
-        const raw = pt[key] ?? 0;
-        const y = getY(key === 'battery' || key === 'grid' ? Math.abs(raw) : raw);
+        const y = getY(pt[key] ?? 0);
         return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
       })
       .join(' ');
@@ -96,14 +131,31 @@ export function GenerationOverviewCard({
     if (points.length === 0) return '';
     const firstPtX = getXFromMinutes(parseTimeToMinutes(points[0].time));
     const lastPtX = getXFromMinutes(parseTimeToMinutes(points[points.length - 1].time));
-    const baseY = (paddingY + chartHeight).toFixed(1);
+    const baseY = zeroY.toFixed(1);
     return `${path} L ${lastPtX.toFixed(1)} ${baseY} L ${firstPtX.toFixed(1)} ${baseY} Z`;
+  };
+
+  const buildSocPath = () => {
+    let d = '';
+    let inSegment = false;
+    for (const pt of points) {
+      if (pt.batterySoc === null || pt.batterySoc === undefined || !Number.isFinite(pt.batterySoc)) {
+        inSegment = false;
+        continue;
+      }
+      const x = getXFromMinutes(parseTimeToMinutes(pt.time));
+      const y = getSocY(pt.batterySoc);
+      d += `${inSegment ? ' L' : 'M'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+      inSegment = true;
+    }
+    return d.trim();
   };
 
   const solarPath = points.length ? buildPath('solar') : '';
   const loadPath = points.length ? buildPath('load') : '';
   const batteryPath = points.length ? buildPath('battery') : '';
   const gridPath = points.length ? buildPath('grid') : '';
+  const socPath = points.length ? buildSocPath() : '';
 
   const solarArea = buildArea(solarPath);
   const loadArea = buildArea(loadPath);
@@ -226,7 +278,21 @@ export function GenerationOverviewCard({
               }`}
             >
               <span className="w-2 h-2 rounded-full bg-[#8e5fd6]" />
-              Battery
+              Battery kW
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setVisibleSeries((s) => ({ ...s, batterySoc: !s.batterySoc }))}
+              aria-pressed={visibleSeries.batterySoc}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition-colors ${
+                visibleSeries.batterySoc
+                  ? 'bg-purple-50 text-purple-700 border-purple-200'
+                  : 'bg-gray-50 text-[var(--muted)] border-[var(--line)] line-through'
+              }`}
+            >
+              <span className="w-3 border-t-2 border-dashed border-[#8e5fd6]" aria-hidden="true" />
+              Battery %
             </button>
 
             <button
@@ -245,7 +311,7 @@ export function GenerationOverviewCard({
           </div>
 
           {activePoint && (
-            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-[var(--bg)] border border-[var(--line)] text-[11px] text-[var(--text)] num">
+            <div className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 px-2.5 py-1 rounded-md bg-[var(--bg)] border border-[var(--line)] text-[11px] text-[var(--text)] num">
               <Clock className="w-3 h-3 text-[var(--muted)]" aria-hidden="true" />
               <span className="font-semibold">{activePoint.time}</span>
               <span className="text-[var(--muted)]">·</span>
@@ -255,6 +321,25 @@ export function GenerationOverviewCard({
               <span className="text-[var(--muted)]">·</span>
               <span>
                 Load <strong className="text-[#f0418c]">{activePoint.load.toFixed(2)}</strong> kW
+              </span>
+              <span className="text-[var(--muted)]">·</span>
+              <span>
+                Battery{' '}
+                <strong className="text-[#8e5fd6]">
+                  {formatSignedKw(activePoint.battery ?? 0)} kW
+                </strong>{' '}
+                ({describeBattery(activePoint.battery ?? 0)})
+                {activePoint.batterySoc !== null && activePoint.batterySoc !== undefined
+                  ? ` · SOC ${Math.round(activePoint.batterySoc)}%`
+                  : ''}
+              </span>
+              <span className="text-[var(--muted)]">·</span>
+              <span>
+                Grid{' '}
+                <strong className="text-[#43c6f0]">
+                  {formatSignedKw(activePoint.grid ?? 0)} kW
+                </strong>{' '}
+                ({describeGrid(activePoint.grid ?? 0)})
               </span>
             </div>
           )}
@@ -298,10 +383,13 @@ export function GenerationOverviewCard({
                 </linearGradient>
               </defs>
 
-              {/* Horizontal Grid Lines & kW Axis Labels */}
+              {/* Horizontal Grid Lines & Left kW + Right SOC % Axis Labels */}
               {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
                 const y = paddingY + chartHeight * (1 - ratio);
-                const kwLabel = (maxVal * ratio).toFixed(1);
+                const kwVal = minVal + range * ratio;
+                const kwLabel = Math.abs(kwVal) < 0.05 ? '0.0' : kwVal.toFixed(1);
+                const hideForZero = minVal < 0 && Math.abs(y - zeroY) < 13;
+                const socLabel = Math.round(ratio * 100);
                 return (
                   <g key={i}>
                     <line
@@ -312,19 +400,75 @@ export function GenerationOverviewCard({
                       stroke="#eef0f5"
                       strokeWidth="1"
                     />
+                    {!hideForZero && (
+                      <text
+                        x={paddingX - 8}
+                        y={y + 3.5}
+                        fill="#8a8fa3"
+                        fontSize="10"
+                        fontFamily="var(--font-mono), monospace"
+                        textAnchor="end"
+                      >
+                        {kwLabel} kW
+                      </text>
+                    )}
                     <text
-                      x={paddingX - 8}
+                      x={svgWidth - paddingX + 8}
                       y={y + 3.5}
                       fill="#8a8fa3"
                       fontSize="10"
                       fontFamily="var(--font-mono), monospace"
-                      textAnchor="end"
+                      textAnchor="start"
                     >
-                      {kwLabel} kW
+                      {socLabel}%
                     </text>
                   </g>
                 );
               })}
+
+              {/* Solid Zero Baseline & Direction Captions when negative values exist */}
+              {minVal < 0 && (
+                <g>
+                  <line
+                    x1={paddingX}
+                    y1={zeroY}
+                    x2={svgWidth - paddingX}
+                    y2={zeroY}
+                    stroke="#cbd5e1"
+                    strokeWidth="1.2"
+                  />
+                  <text
+                    x={paddingX - 8}
+                    y={zeroY + 3.5}
+                    fill="#64748b"
+                    fontSize="10"
+                    fontFamily="var(--font-mono), monospace"
+                    textAnchor="end"
+                  >
+                    0.0 kW
+                  </text>
+                  <text
+                    x={paddingX + 6}
+                    y={zeroY - 5}
+                    fill="#8a8fa3"
+                    fontSize="10"
+                    textAnchor="start"
+                    pointerEvents="none"
+                  >
+                    ↑ charge / export
+                  </text>
+                  <text
+                    x={paddingX + 6}
+                    y={Math.min(zeroY + 11, svgHeight - 4)}
+                    fill="#8a8fa3"
+                    fontSize="10"
+                    textAnchor="start"
+                    pointerEvents="none"
+                  >
+                    ↓ discharge / import
+                  </text>
+                </g>
+              )}
 
               {/* Vertical 4-Hour Grid Lines */}
               {hourMarkers.map((hour, idx) => {
@@ -389,6 +533,17 @@ export function GenerationOverviewCard({
                   strokeLinejoin="round"
                 />
               )}
+              {visibleSeries.batterySoc && socPath && (
+                <path
+                  d={socPath}
+                  fill="none"
+                  stroke="#8e5fd6"
+                  strokeWidth="2"
+                  strokeDasharray="4 3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              )}
 
               {/* "Now" Vertical Marker */}
               <line
@@ -444,6 +599,38 @@ export function GenerationOverviewCard({
                       strokeWidth="2"
                     />
                   )}
+                  {visibleSeries.battery && (
+                    <circle
+                      cx={getXFromMinutes(parseTimeToMinutes(activePoint.time))}
+                      cy={getY(activePoint.battery ?? 0)}
+                      r="4"
+                      fill="#8e5fd6"
+                      stroke="#ffffff"
+                      strokeWidth="2"
+                    />
+                  )}
+                  {visibleSeries.grid && (
+                    <circle
+                      cx={getXFromMinutes(parseTimeToMinutes(activePoint.time))}
+                      cy={getY(activePoint.grid ?? 0)}
+                      r="4"
+                      fill="#43c6f0"
+                      stroke="#ffffff"
+                      strokeWidth="2"
+                    />
+                  )}
+                  {visibleSeries.batterySoc &&
+                    activePoint.batterySoc !== null &&
+                    activePoint.batterySoc !== undefined && (
+                      <circle
+                        cx={getXFromMinutes(parseTimeToMinutes(activePoint.time))}
+                        cy={getSocY(activePoint.batterySoc)}
+                        r="3.5"
+                        fill="#ffffff"
+                        stroke="#8e5fd6"
+                        strokeWidth="2"
+                      />
+                    )}
                 </g>
               )}
             </svg>

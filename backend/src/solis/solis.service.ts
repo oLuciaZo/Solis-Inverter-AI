@@ -361,6 +361,14 @@ export class SolisService {
           const load = kw(item.familyLoadPower ?? item.consumeEnergy);
           const battery = kw(item.batteryPower);
           const grid = kw(item.psum);
+          const rawSoc = item.batteryCapacitySoc;
+          const parsedSoc =
+            rawSoc !== undefined && rawSoc !== null && rawSoc !== ''
+              ? Number(rawSoc)
+              : NaN;
+          const batterySoc = Number.isFinite(parsedSoc)
+            ? Math.max(0, Math.min(100, parsedSoc))
+            : null;
 
           return {
             time: item.timeStr?.length > 5 ? item.timeStr.substring(0, 5) : item.timeStr || '',
@@ -368,6 +376,7 @@ export class SolisService {
             load,
             battery,
             grid,
+            batterySoc,
           };
         });
         return { date: targetDate, points };

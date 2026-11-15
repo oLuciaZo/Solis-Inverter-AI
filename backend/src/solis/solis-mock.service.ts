@@ -174,6 +174,7 @@ export class SolisMockService {
   public getDailyCurve(dateStr?: string) {
     const points: any[] = [];
     const date = dateStr || new Date().toISOString().split('T')[0];
+    let soc = 42;
     for (let h = 5; h <= 21; h++) {
       for (let m = 0; m < 60; m += 15) {
         const timeVal = h + m / 60;
@@ -191,6 +192,8 @@ export class SolisMockService {
 
         const battery = pv > load ? Math.min(pv - load, 3.2) : -Math.min(load - pv, 2.8);
         const grid = pv - load - battery;
+        // Integrate 15-min (0.25h) battery power against a 15 kWh pack
+        soc = Math.max(0, Math.min(100, soc + ((battery * 0.25) / 15) * 100));
 
         points.push({
           time: timeFormatted,
@@ -198,6 +201,7 @@ export class SolisMockService {
           load: parseFloat(load.toFixed(2)),
           battery: parseFloat(battery.toFixed(2)),
           grid: parseFloat(grid.toFixed(2)),
+          batterySoc: Math.round(soc),
         });
       }
     }
